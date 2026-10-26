@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BST Rotation Game</title>
+<style>
+  :root{
+    --bg:#f6f4f1; --surface:#ffffff; --text:#1d1c1a; --muted:#70706b; --border:#ddd8d0;
+    --accent:#5b7fff; --accent-dark:#3f5fe0; --node-fill:#eef1ff; --sel:#ff8a3d; --good:#2fae82;
+    color-scheme: light;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#15161a; --surface:#1f2127; --text:#f2f1ee; --muted:#9a9a97; --border:#33353c;
+      --accent:#7b93ff; --accent-dark:#9fb0ff; --node-fill:#262a3a; --sel:#ffa557; --good:#4ad9a0;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#15161a; --surface:#1f2127; --text:#f2f1ee; --muted:#9a9a97; --border:#33353c;
+    --accent:#7b93ff; --accent-dark:#9fb0ff; --node-fill:#262a3a; --sel:#ffa557; --good:#4ad9a0;
+    color-scheme: dark;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:720px; margin:0 auto; padding:28px 18px 40px; text-align:center; }
+  h1{ font-size:1.4rem; margin:0 0 4px; }
+  .goal{ color:var(--muted); margin:0 0 16px; font-size:0.95rem; }
+  .stats{ display:flex; justify-content:center; gap:18px; flex-wrap:wrap; margin-bottom:14px; font-size:0.9rem; color:var(--muted); }
+  .stats b{ color:var(--text); }
+  .board{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:8px; touch-action:pan-y; }
+  svg{ width:100%; height:auto; display:block; max-height:55vh; }
+  .edge{ stroke:var(--border); stroke-width:2.5; transition:x1 .4s ease,y1 .4s ease,x2 .4s ease,y2 .4s ease; }
+  .node{ fill:var(--node-fill); stroke:var(--accent); stroke-width:2.5; cursor:pointer; transition:cx .4s ease,cy .4s ease; }
+  .node:hover{ filter:brightness(0.95); }
+  .node.selected{ stroke:var(--sel); stroke-width:4; }
+  .label{ fill:var(--text); font-size:15px; font-weight:600; pointer-events:none; transition:x .4s ease,y .4s ease; }
+  .controls{ display:flex; justify-content:center; gap:10px; flex-wrap:wrap; margin:18px 0 8px; }
+  button{ font:inherit; font-weight:600; font-size:0.92rem; padding:10px 16px; border-radius:999px; border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer; }
+  button:hover{ border-color:var(--accent); color:var(--accent-dark); }
+  #newTree{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  .hint{ color:var(--muted); font-size:0.82rem; margin-top:10px; }
+  .msg{ min-height:1.3em; color:var(--sel); font-size:0.88rem; font-weight:600; margin-top:6px; }
+  .overlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); align-items:center; justify-content:center; z-index:50; padding:20px; }
+  .overlay.show{ display:flex; }
+  .card{ background:var(--surface); border-radius:18px; padding:28px 32px; text-align:center; max-width:320px; box-shadow:0 20px 50px rgba(0,0,0,.3); }
+  .card h2{ color:var(--good); margin:0 0 6px; }
+  .card p{ color:var(--muted); margin:0 0 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Balance the Tree</h1>
+  <p class="goal">Rotate nodes until the tree's height reaches <strong>2</strong>.</p>
+  <div class="stats">
+    <span>Height: <b id="height">–</b></span>
+    <span>Moves: <b id="moves">0</b></span>
+    <span>Selected: <b id="selected">none</b></span>
+  </div>
+  <div class="board" id="board">
+    <svg id="svg" viewBox="0 0 700 300" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <div class="controls">
+    <button id="rotLeft" type="button">⟲ Rotate Left (←)</button>
+    <button id="newTree" type="button">New Tree</button>
+    <button id="rotRight" type="button">Rotate Right (→) ⟳</button>
+  </div>
+  <p class="hint">Click a node to select it. Rotate with the buttons, arrow keys, or a swipe on mobile.</p>
+  <div class="msg" id="msg" aria-live="polite"></div>
+</div>
+<div class="overlay" id="overlay">
+  <div class="card">
+    <h2>Balanced! 🎉</h2>
+    <p id="overlayMoves"></p>
+    <button id="again" type="button">Play Again</button>
+  </div>
+</div>
+<script>
+(function(){
+  const svg = document.getElementById('svg');
+  const heightEl = document.getElementById('height');
+  const movesEl = document.getElementById('moves');
+  const selectedEl = document.getElementById('selected');
+  const msgEl = document.getElementById('msg');
+  const overlay = document.getElementById('overlay');
+  const overlayMoves = document.getElementById('overlayMoves');
+  const TARGET_HEIGHT = 2;
+
+  let root = null, selected = null, moves = 0, msgTimer = null;
+  let elements = new Map();
+
+  class Node{ constructor(v){ this.value=v; this.left=null; this.right=null; this.parent=null; } }
+
+  function insert(node, v){
+    if(!node) return new Node(v);
+    if(v < node.value){ node.left = insert(node.left, v); node.left.parent = node; }
+    else { node.right = insert(node.right, v); node.right.parent = node; }
+    return node;
+  }
+  function height(node){ return node ? 1 + Math.max(height(node.left), height(node.right)) : -1; }
+
+  function rotateLeft(x){
+    const y = x.right; if(!y) return false;
+    x.right = y.left; if(y.left) y.left.parent = x;
+    y.parent = x.parent;
+    if(!x.parent) root = y;
+    else if(x.parent.left === x) x.parent.left = y; else x.parent.right = y;
+    y.left = x; x.parent = y; return true;
+  }
+  function rotateRight(x){
+    const y = x.left; if(!y) return false;
+    x.left = y.right; if(y.right) y.right.parent = x;
+    y.parent = x.parent;
+    if(!x.parent) root = y;
+    else if(x.parent.right === x) x.parent.right = y; else x.parent.left = y;
+    y.right = x; x.parent = y; return true;
+  }
+  function findNode(node, v){
+    if(!node) return null;
+    if(node.value === v) return node;
+    return findNode(node.left, v) || findNode(node.right, v);
+  }
+
+  function generateTree(){
+    const vals = new Set();
+    while(vals.size < 7) vals.add(1 + Math.floor(Math.random()*99));
+    const base = [...vals];
+    let h, order;
+    do{
+      order = [...base].sort(() => Math.random()-0.5);
+      root = null;
+      order.forEach(v => { root = insert(root, v); });
+      h = height(root);
+    } while(h <= TARGET_HEIGHT);
+    moves = 0; selected = null;
+    movesEl.textContent = '0'; selectedEl.textContent = 'none'; msgEl.textContent = '';
+    overlay.classList.remove('show');
+    render();
+  }
+
+  function resetBoard(){
+    elements.forEach(el => { el.line.remove(); el.circle.remove(); el.text.remove(); });
+    elements.clear();
+    generateTree();
+  }
+
+  function layout(){
+    const positions = new Map();
+    let i = 0, maxDepth = 0;
+    (function inorder(node, depth){
+      if(!node) return;
+      inorder(node.left, depth+1);
+      positions.set(node, {i: i++, depth});
+      maxDepth = Math.max(maxDepth, depth);
+      inorder(node.right, depth+1);
+    })(root, 0);
+    const spacingX = 700 / (positions.size + 1);
+    positions.forEach((pos, node) => { node.x = spacingX*(pos.i+1); node.y = 50 + pos.depth*70; });
+    svg.setAttribute('viewBox', `0 0 700 ${100 + maxDepth*70}`);
+  }
+
+  function render(){
+    layout();
+    const seen = new Set();
+    (function walk(node){
+      if(!node) return;
+      seen.add(node.value);
+      let el = elements.get(node.value);
+      if(!el){
+        const ns = 'http://www.w3.org/2000/svg';
+        const line = document.createElementNS(ns,'line'); line.setAttribute('class','edge');
+        const circle = document.createElementNS(ns,'circle'); circle.setAttribute('r',20); circle.setAttribute('class','node');
+        circle.addEventListener('click', () => selectNode(node.value));
+        const text = document.createElementNS(ns,'text'); text.setAttribute('class','label');
+        text.textContent = node.value; text.setAttribute('text-anchor','middle'); text.setAttribute('dy','0.35em');
+        svg.appendChild(line); svg.appendChild(circle); svg.appendChild(text);
+        el = {line, circle, text}; elements.set(node.value, el);
+      }
+      if(node.parent){
+        el.line.setAttribute('x1', node.parent.x); el.line.setAttribute('y1', node.parent.y);
+        el.line.setAttribute('x2', node.x); el.line.setAttribute('y2', node.y);
+        el.line.style.opacity = 1;
+      } else { el.line.style.opacity = 0; }
+      el.circle.setAttribute('cx', node.x); el.circle.setAttribute('cy', node.y);
+      el.circle.classList.toggle('selected', selected === node.value);
+      el.text.setAttribute('x', node.x); el.text.setAttribute('y', node.y);
+      walk(node.left); walk(node.right);
+    })(root);
+    elements.forEach((el, val) => { if(!seen.has(val)){ el.line.remove(); el.circle.remove(); el.text.remove(); elements.delete(val); } });
+
+    const h = height(root);
+    heightEl.textContent = h;
+    if(h <= TARGET_HEIGHT){
+      setTimeout(() => {
+        overlayMoves.textContent = `Solved in ${moves} move${moves===1?'':'s'}.`;
+        overlay.classList.add('show');
+      }, 450);
+    }
+  }
+
+  function selectNode(v){ selected = v; selectedEl.textContent = v; render(); }
+
+  function flashMsg(text){
+    msgEl.textContent = text;
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => { msgEl.textContent = ''; }, 1600);
+  }
+
+  function doRotate(dir){
+    if(selected === null){ flashMsg('Select a node first'); return; }
+    const node = findNode(root, selected);
+    const ok = dir === 'left' ? rotateLeft(node) : rotateRight(node);
+    if(!ok){ flashMsg(`Can't rotate ${dir} — no ${dir==='left'?'right':'left'} child`); return; }
+    moves++; movesEl.textContent = moves; msgEl.textContent = '';
+    render();
+  }
+
+  document.getElementById('newTree').addEventListener('click', resetBoard);
+  document.getElementById('again').addEventListener('click', resetBoard);
+  document.getElementById('rotLeft').addEventListener('click', () => doRotate('left'));
+  document.getElementById('rotRight').addEventListener('click', () => doRotate('right'));
+  window.addEventListener('keydown', e => {
+    if(e.key === 'ArrowLeft' || e.key === 'l' || e.key === 'L') doRotate('left');
+    if(e.key === 'ArrowRight' || e.key === 'r' || e.key === 'R') doRotate('right');
+  });
+
+  let touchX = null;
+  const board = document.getElementById('board');
+  board.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; });
+  board.addEventListener('touchend', e => {
+    if(touchX === null) return;
+    const dx = e.changedTouches[0].clientX - touchX;
+    if(Math.abs(dx) > 40) doRotate(dx < 0 ? 'left' : 'right');
+    touchX = null;
+  });
+
+  generateTree();
+})();
+</script>
+</body>
+</html>
